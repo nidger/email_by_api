@@ -2,6 +2,21 @@
 
 A Python-based system for managing email campaigns with MongoDB and SendGrid, featuring contact management, campaign creation, and automated sending with frequency controls.
 
+## Project Structure
+
+```
+email_by_api_v2/
+├── .env (environment variables - not in Git)
+├── .gitignore
+├── email-system/ (Git-tracked code)
+│   ├── setup_database.py
+│   ├── import_contacts.py
+│   ├── import_campaign_contacts.py
+│   ├── send_campaign_emails.py
+│   └── update_dates.py
+└── email-system-data/ (local data only - not in Git)
+```
+
 ## Requirements
 
 ```
@@ -10,9 +25,20 @@ pymongo
 sendgrid
 ```
 
-Environment variables needed in `.env`:
+## Environment Setup
+
+1. Clone the repository:
+```bash
+git clone https://github.com/nidger/email_by_api.git
+```
+
+2. Create a `.env` file in the root directory with:
 - MONGODB_URI
 - SENDGRID_API_KEY
+- DEFAULT_FROM_EMAIL
+- PARTNER_WEBSITE_URL
+
+Note: The .env file is not tracked in Git for security.
 
 ## System Components
 
@@ -127,6 +153,16 @@ The system includes:
 - Missing data handling
 - SendGrid error tracking
 - Campaign status monitoring
+
+## Development
+
+This project uses Git for version control. All sensitive data (including the .env file and email-system-data directory) is excluded from Git tracking.
+
+To make changes:
+1. Edit files in the email-system/ directory
+2. Stage changes: `git add .`
+3. Commit changes: `git commit -m "Your message"`
+4. Push to GitHub: `git push`
 
 ## Author
 
