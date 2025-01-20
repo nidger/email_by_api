@@ -134,4 +134,4 @@ The system includes:
 
 ## License
 
-[Your License Choice]
+[Your License Choice - no licence chosen yet]
