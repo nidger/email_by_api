@@ -40,10 +40,10 @@ def is_valid_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return bool(re.match(pattern, email))
 
-def process_contact(data, known_providers):
+def process_contact(data, known_providers, existing_contacts):
     """Extract and validate contact data"""
     business_info = data.get('business_info', {})
-    email = business_info.get('email')
+    email = business_info.get('email', '').lower()
     
     if not email:
         return None, "Missing email"
@@ -55,8 +55,17 @@ def process_contact(data, known_providers):
     if not domain:
         return None, "Invalid domain format"
     
-    # Check if domain is a known provider
+    # Check if domain is a provider domain
     is_provider_domain = domain in known_providers
+    
+    # For provider domains, only check exact email match
+    # For business domains, check domain-level duplicates
+    duplicate_check = {'email': email} if is_provider_domain else {'domain': domain}
+    existing = existing_contacts.find_one(duplicate_check)
+    
+    if existing:
+        error_msg = "Email already exists" if is_provider_domain else "Business domain already exists"
+        return None, error_msg
     
     contact_data = {
         'email': email,
@@ -84,7 +93,8 @@ def import_contacts(file_path):
         'imported': 0,
         'skipped_no_email': 0,
         'skipped_invalid_email': 0,
-        'skipped_provider_domain': 0,
+        'skipped_duplicate_email': 0,
+        'skipped_duplicate_domain': 0,
         'updated': 0,
         'errors': 0
     }
@@ -105,45 +115,21 @@ def import_contacts(file_path):
             stats['processed'] += 1
             
             try:
-                contact_data, error = process_contact(record, known_providers)
+                contact_data, error = process_contact(record, known_providers, contacts)
                 
                 if error:
                     logging.warning(f"Skipping record: {error}")
-                    if "email" in error:
+                    if "Missing email" in error:
                         stats['skipped_no_email'] += 1
                     elif "Invalid" in error:
                         stats['skipped_invalid_email'] += 1
+                    elif "Email already exists" in error:
+                        stats['skipped_duplicate_email'] += 1
+                    elif "Business domain already exists" in error:
+                        stats['skipped_duplicate_domain'] += 1
                     continue
-                
-                # Check for provider domain
-                if contact_data['is_provider_domain']:
-                    logging.warning(f"Skipping provider domain email: {contact_data['email']}")
-                    stats['skipped_provider_domain'] += 1
-                    continue
-                
-                # Check existing contacts at domain level
-                domain = contact_data['domain']
-                existing_domain = db.existing_customers.find_one({'domain': domain})
-                
-                if existing_domain:
-                    logging.info(f"Domain {domain} already exists in database")
-                    continue
-                
-                # Add to existing_customers
-                db.existing_customers.update_one(
-                    {'domain': domain},
-                    {
-                        '$set': {
-                            'email': contact_data['email'],
-                            'domain': domain,
-                            'added_date': datetime.now(UTC),
-                            'source_id': str(record.get('id', ''))
-                        }
-                    },
-                    upsert=True
-                )
-                
-                # Update master contacts list
+
+                # Add to contacts collection
                 result = contacts.update_one(
                     {'email': contact_data['email']},
                     {'$set': contact_data},
@@ -152,7 +138,8 @@ def import_contacts(file_path):
                 
                 if result.upserted_id:
                     stats['imported'] += 1
-                    logging.info(f"Imported new contact: {contact_data['email']}")
+                    domain_type = "provider domain" if contact_data['is_provider_domain'] else "business domain"
+                    logging.info(f"Imported new contact: {contact_data['email']} ({domain_type})")
                 elif result.modified_count:
                     stats['updated'] += 1
                     logging.info(f"Updated existing contact: {contact_data['email']}")
@@ -196,7 +183,8 @@ def main():
         logging.info(f"Updated: {stats['updated']}")
         logging.info(f"Skipped (no email): {stats['skipped_no_email']}")
         logging.info(f"Skipped (invalid email): {stats['skipped_invalid_email']}")
-        logging.info(f"Skipped (provider domain): {stats['skipped_provider_domain']}")
+        logging.info(f"Skipped (duplicate email): {stats['skipped_duplicate_email']}")
+        logging.info(f"Skipped (duplicate domain): {stats['skipped_duplicate_domain']}")
         logging.info(f"Errors: {stats['errors']}")
 
 if __name__ == "__main__":

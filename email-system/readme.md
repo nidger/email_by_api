@@ -1,151 +1,136 @@
 # Email Campaign System
 
-A Python-based system for managing email campaigns with MongoDB and SendGrid, featuring contact management, campaign creation, automated sending with frequency controls, and intelligent email provider validation.
+A Python-based system for managing B2B email campaigns with MongoDB and SendGrid, featuring intelligent contact handling, campaign management, and automated sending with frequency controls.
 
-## Project Structure
+## Key Features
 
-```
-email_by_api_v2/
-├── .env (environment variables - not in Git)
-├── .gitignore
-├── email-system/ (Git-tracked code)
-│   ├── setup_database.py        # Database initialization
-│   ├── import_contacts.py       # Master contact list management
-│   ├── import_campaign_contacts.py  # Campaign-specific imports
-│   ├── send_campaign_emails.py  # Email sending logic
-│   ├── update_dates.py         # Testing utility
-│   └── email_providers.json    # Validated provider list
-└── email-system-data/ (local data only - not in Git)
-    ├── contacts.json          # Your contact data
-    └── campaign_contacts.json  # Campaign-specific contacts
-```
+* Smart domain handling (business vs provider domains)
+* Contact deduplication with domain-level rules
+* Campaign-specific validation
+* 14-day frequency control per email address
+* Existing customer protection
+* Comprehensive logging and statistics
 
-## Requirements
+## System Logic and Flow
 
-```
-python-dotenv
-pymongo
-sendgrid
-```
+### 1. Database Setup (`setup_database.py`)
 
-## Environment Setup
+Sets up MongoDB collections with required indexes and validation:
 
-1. Clone the repository:
-```bash
-git clone https://github.com/nidger/email_by_api.git
-```
+* contacts: Master contact list
+* campaigns: Campaign definitions and recipient lists
+* email_history: Record of all sent emails
+* email_providers: List of known email provider domains
+* existing_customers: Current customer database
+* unsubscribes: Opt-out tracking
 
-2. Create a `.env` file in the root directory with:
-- MONGODB_URI
-- SENDGRID_API_KEY
-- DEFAULT_FROM_EMAIL
-- PARTNER_WEBSITE_URL
+### 2. Contact Import Process (`import_contacts.py`)
 
-Note: The .env file and all data files are not tracked in Git for security.
+Creates the master contact list with these validation rules:
 
-## Database Collections
+**Provider Domains (e.g., gmail.com, yahoo.com)**
+* Listed in email_providers collection
+* Multiple contacts allowed from same domain
+* Only checks for exact email duplicates
+* Example: Both john@gmail.com and jane@gmail.com are allowed
 
-### Core Collections
-- `contacts`: Master list of all contacts
-  - Unique email index
-  - Last email tracking
-  - Business information storage
+**Business Domains (e.g., company.com)**
+* Any domain not in email_providers list
+* Only ONE contact allowed per domain
+* Checks for domain-level duplicates
+* Example: If john@company.com exists, jane@company.com is blocked
 
-- `campaigns`: Campaign information
-  - Unique campaign name index
-  - Status tracking
-  - Recipient list management
+### 3. Campaign Creation (`import_campaign_contacts.py`)
 
-- `email_history`: Record of all sent emails
-  - Contact email tracking
-  - Campaign association
-  - Sending date indexing
+Creates a campaign with these steps:
 
-- `unsubscribes`: Unsubscribed contact tracking
-  - Unique email enforcement
-  - Timestamp tracking
+1. **Initial Validation**
+   * Checks campaign name doesn't exist
+   * Validates email format
+   * Verifies against existing_customers
 
-### New Features
-- `email_providers`: Known email provider domains
-  - Validates contact email domains
-  - Prevents common typos
-  - Helps identify business vs personal emails
-  - Automatic updates from JSON source
+2. **Contact Processing Rules**
+   * For Provider Domains (gmail.com):
+     * Allows multiple different emails
+     * Blocks exact duplicates only
+   * For Business Domains (company.com):
+     * Allows same contact to be added
+     * Blocks different contacts from same domain
+   * Maintains running statistics
 
-- `existing_customers`: Customer tracking
-  - Domain-based duplicate detection
-  - Source tracking
-  - Added date monitoring
+3. **Campaign Creation**
+   * Creates campaign record
+   * Stores recipient list
+   * Sets status to 'ready'
+   * Records validation statistics
 
-## Contact Processing Rules
+### 4. Email Sending Process (`send_campaign_emails.py`)
 
-### Validation Rules
-1. Email format validation
-2. Domain verification against email_providers list
-3. Business domain identification
-4. Duplicate detection at both email and domain levels
+Sends emails with these checks:
 
-### Sending Rules
-1. 14-day minimum between emails to same contact
-2. Automatic duplicate handling across campaigns
-3. Domain-based frequency controls
-4. Complete contact history tracking
+1. **Pre-send Validation** (per recipient)
+   * Validates email format
+   * Checks unsubscribe list
+   * Verifies against existing customers
+   * Enforces 14-day frequency limit
 
-### Data Management
-1. Automatic domain extraction and validation
-2. Business information preservation
-3. Source tracking for all contacts
-4. Activity status monitoring
+2. **Frequency Control**
+   * Tracks last_email_sent date per contact
+   * Skips if email sent within last 14 days
+   * Applies to specific email address only
+   * Domain relationship doesn't affect frequency
 
-## Usage Instructions
+3. **Send Process**
+   * Configures SendGrid settings
+   * Sends email via API
+   * Records in email_history
+   * Updates contact's last_email_sent
+   * Updates campaign status
 
-### 1. Database Setup
+4. **Status Tracking**
+   * Records successful sends
+   * Tracks failures
+   * Counts skipped emails by reason
+   * Updates final campaign status
 
-Initialize the database structure and email providers:
+## Example Usage
+
+1. **Setup Database**
 ```bash
 python3 setup_database.py
 ```
 
-This will:
-- Create all required collections
-- Set up indexes
-- Import validated email providers
-- Establish validation rules
-
-### 2. Contact Management
-
-#### Import Contacts to Master List
+2. **Import Master Contacts**
 ```bash
 python3 import_contacts.py
 ```
-or specify a file:
-```bash
-python3 import_contacts.py --file your_contacts.json
-```
 
-#### Create a Campaign
+3. **Create Campaign**
 ```bash
 python3 import_campaign_contacts.py --campaign "Campaign Name"
 ```
-Options:
-- `--campaign`: Name of your campaign (required)
-- `--file`: JSON file with contacts (defaults to 'campaign_contacts.json')
 
-### 3. Sending Campaigns
+4. **Send Campaign**
 ```bash
 python3 send_campaign_emails.py --campaign "Campaign Name"
 ```
 
-### 4. Testing Tools
+## Test Utilities
 
-Update email dates for testing frequency rules:
+`update_dates.py`: Updates last_email_sent dates for testing frequency controls
 ```bash
 python3 update_dates.py --days 15
 ```
 
-## Data Format Requirements
+## Required Environment Variables (.env)
+```
+MONGODB_URI=your_mongodb_connection_string
+SENDGRID_API_KEY=your_sendgrid_api_key
+DEFAULT_FROM_EMAIL=your_sender_email
+PARTNER_WEBSITE_URL=your_website_url
+```
 
-### Contact JSON Structure
+## Contact JSON Structure
 ```json
 {
   "store_name": "Example Store",
@@ -163,55 +148,72 @@ python3 update_dates.py --days 15
 }
 ```
 
-### Email Providers JSON
-```json
-{
-  "email_providers": [
-    "provider1.com",
-    "provider2.com"
-  ]
-}
+## Understanding Campaign Results
+
+### Success Example
 ```
+Campaign 'Test Campaign' completed:
+Total recipients: 5
+Successfully sent: 5
+Failed: 0
+Skipped (invalid email): 0
+Skipped (frequency): 0
+Skipped (unsubscribed): 0
+Skipped (existing customer): 0
+```
+
+### Frequency Control Example
+```
+Campaign 'Test Campaign' completed:
+Total recipients: 5
+Successfully sent: 1
+Failed: 0
+Skipped (invalid email): 0
+Skipped (frequency): 4  # Emails sent too recently
+Skipped (unsubscribed): 0
+Skipped (existing customer): 0
+```
+
+## Common Scenarios
+
+1. **Multiple Gmail Addresses**
+   * john@gmail.com - Allowed
+   * jane@gmail.com - Allowed (different email)
+   * john@gmail.com - Blocked (exact duplicate)
+
+2. **Business Domain Contacts**
+   * john@company.com - Allowed
+   * john@company.com - Allowed (same contact, different campaign)
+   * jane@company.com - Blocked (different contact, same domain)
+
+3. **Frequency Control**
+   * Day 1: Email sent to contact@example.com
+   * Day 10: Attempt to send again - Blocked (within 14 days)
+   * Day 15: Attempt to send again - Allowed (outside 14 days)
 
 ## Error Handling
 
-The system includes comprehensive error handling for:
-- Email validation failures
-- Domain verification issues
-- Duplicate detection
-- SendGrid API errors
-- Campaign status monitoring
-- Data format validation
+The system provides detailed logs for:
+* Invalid email formats
+* Domain validation failures
+* Sending failures
+* Frequency control skips
+* Existing customer matches
+* Campaign status updates
 
-## Development Guidelines
+## Monitoring
 
-### Version Control
-- All code changes should be made in the `email-system/` directory
-- Never commit data files or .env
-- Update email_providers.json when new providers are validated
+Monitor these aspects for system health:
+* Campaign completion status
+* Email sending success rates
+* Frequency control effectiveness
+* Domain validation patterns
+* Existing customer protection
 
-### Testing
-- Use update_dates.py for frequency rule testing
-- Validate new email providers before adding
-- Test campaign imports with sample data
-- Verify duplicate detection logic
+## Support
 
-## Security Considerations
-
-1. Data Protection
-   - All contact data stays local
-   - No sensitive data in Git
-   - Secure credential management
-
-2. Email Security
-   - Domain validation
-   - Frequency controls
-   - Unsubscribe tracking
-
-## Author
-
-[Your Name]
-
-## License
-
-[Your License Choice - no licence chosen yet]
+For issues or questions:
+1. Check logs for detailed error messages
+2. Verify MongoDB connection and indexes
+3. Confirm SendGrid API functionality
+4. Review .env configuration

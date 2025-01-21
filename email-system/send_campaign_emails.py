@@ -34,6 +34,26 @@ def get_campaign_recipients(db, campaign_name):
         raise ValueError(f"Campaign '{campaign_name}' has invalid status: {campaign['status']}")
     return campaign.get('recipients', [])
 
+def extract_domain(email):
+    """Extract domain from email address"""
+    try:
+        return email.split('@')[1].lower()
+    except (IndexError, AttributeError):
+        return None
+
+def check_existing_customer(db, email):
+    """Check if email or its domain exists in existing customers"""
+    domain = extract_domain(email)
+    if not domain:
+        return False
+        
+    return bool(db.existing_customers.find_one({
+        '$or': [
+            {'email': email},
+            {'domain': domain}
+        ]
+    }))
+
 def record_email_history(db, email, campaign_name, status, error=None):
     """Record email send attempt in history"""
     history_record = {
@@ -118,7 +138,8 @@ def send_campaign_emails(campaign_name):
         'failed': 0,
         'skipped_invalid_email': 0,
         'skipped_frequency': 0,
-        'skipped_unsubscribed': 0
+        'skipped_unsubscribed': 0,
+        'skipped_existing_customer': 0
     }
     
     # Calculate cutoff date for frequency check (14 days ago)
@@ -131,6 +152,13 @@ def send_campaign_emails(campaign_name):
             logging.error(f"Invalid email format: {email}")
             stats['skipped_invalid_email'] += 1
             record_email_history(db, email, campaign_name, 'failed', 'Invalid email format')
+            continue
+
+        # Check if this is an existing customer
+        if check_existing_customer(db, email):
+            logging.info(f"Skipping existing customer: {email}")
+            stats['skipped_existing_customer'] += 1
+            record_email_history(db, email, campaign_name, 'skipped', 'Existing customer')
             continue
 
         # Check if contact is unsubscribed
@@ -194,6 +222,7 @@ def send_campaign_emails(campaign_name):
     logging.info(f"Skipped (invalid email): {stats['skipped_invalid_email']}")
     logging.info(f"Skipped (frequency): {stats['skipped_frequency']}")
     logging.info(f"Skipped (unsubscribed): {stats['skipped_unsubscribed']}")
+    logging.info(f"Skipped (existing customer): {stats['skipped_existing_customer']}")
 
 def main():
     parser = argparse.ArgumentParser(description='Send emails for a specific campaign')
