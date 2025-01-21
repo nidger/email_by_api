@@ -1,6 +1,7 @@
 from pymongo import MongoClient, ASCENDING
 from datetime import datetime, UTC
 import os
+import json
 from dotenv import load_dotenv
 import re
 
@@ -10,6 +11,26 @@ def extract_domain(email):
         return email.split('@')[1].lower()
     except (IndexError, AttributeError):
         return None
+
+def get_email_providers(file_path='email_providers.json'):
+    """Load email providers from JSON file and return deduplicated list"""
+    # Default providers in case file loading fails
+    default_providers = [
+        'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
+        'aol.com', 'protonmail.com', 'icloud.com'
+    ]
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            data = json.load(file)
+            providers = data.get('email_providers', [])
+            # Ensure all providers are lowercase and unique
+            providers = sorted(list({p.strip().lower() for p in providers if p.strip()}))
+            return providers if providers else default_providers
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"Warning: Error loading {file_path}: {e}")
+        print("Using default email providers list.")
+        return default_providers
 
 def setup_database():
     # Load environment variables
@@ -65,6 +86,50 @@ def setup_database():
     existing_customers.create_index([('email', ASCENDING)], unique=True)
     existing_customers.create_index([('domain', ASCENDING)])
     print("Created existing_customers collection with indexes")
+
+    # Create email_providers collection
+    email_providers = db.create_collection(
+        'email_providers',
+        validator={
+            '$jsonSchema': {
+                'bsonType': 'object',
+                'required': ['domain', 'added_date'],
+                'properties': {
+                    'domain': {
+                        'bsonType': 'string',
+                        'pattern': '^[a-z0-9][a-z0-9-.]+(\\.[a-z]{2,})+$'
+                    },
+                    'added_date': {
+                        'bsonType': 'date'
+                    },
+                    'description': {
+                        'bsonType': ['string', 'null']
+                    }
+                }
+            }
+        }
+    )
+
+    # Create index for email_providers
+    email_providers.create_index([('domain', ASCENDING)], unique=True)
+    print("Created email_providers collection with indexes")
+
+    # Populate email_providers with initial data
+    providers_list = get_email_providers()
+    if providers_list:
+        provider_documents = [
+            {
+                'domain': domain,
+                'added_date': datetime.now(UTC),
+                'description': 'Initial provider'
+            }
+            for domain in providers_list
+        ]
+        try:
+            email_providers.insert_many(provider_documents)
+            print(f"Successfully inserted {len(providers_list)} email providers")
+        except Exception as e:
+            print(f"Error inserting email providers: {e}")
 
     # Create campaigns collection
     campaigns = db.create_collection('campaigns')
@@ -126,6 +191,23 @@ def setup_database():
 
     except Exception as e:
         print(f"Error during test insert into existing_customers: {e}")
+
+    # Test insert into email_providers
+    try:
+        test_provider = {
+            'domain': 'test-provider.com',
+            'added_date': datetime.now(UTC),
+            'description': 'Test provider'
+        }
+        email_providers.insert_one(test_provider)
+        print("Successfully inserted test email provider")
+
+        # Clean up test data
+        email_providers.delete_one({'domain': 'test-provider.com'})
+        print("Cleaned up test email provider")
+
+    except Exception as e:
+        print(f"Error during test insert into email_providers: {e}")
 
     # Print collection info with better formatting
     print("\nDatabase setup complete. Collection information:")
