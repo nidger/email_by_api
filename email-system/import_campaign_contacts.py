@@ -40,10 +40,10 @@ def is_valid_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return bool(re.match(pattern, email))
 
-def process_contact(data, known_providers):
+def process_contact(data, known_providers, existing_business_domains, campaign_emails):
     """Extract and validate contact data"""
     business_info = data.get('business_info', {})
-    email = business_info.get('email')
+    email = business_info.get('email', '').lower()
     
     if not email:
         return None, "Missing email"
@@ -55,13 +55,17 @@ def process_contact(data, known_providers):
     if not domain:
         return None, "Invalid domain format"
     
-    # Check if domain is a known provider
-    is_provider_domain = domain in known_providers
+    # Check if email already exists in this campaign
+    if email in campaign_emails:
+        return None, "Email already exists in this campaign"
+    
+    # For non-provider domains, check business domain duplication
+    if domain not in known_providers and domain in existing_business_domains:
+        return None, f"Business domain {domain} already exists"
     
     contact_data = {
         'email': email,
         'domain': domain,
-        'is_provider_domain': is_provider_domain,
         'business_name': business_info.get('business name'),
         'first_name': business_info.get('first name'),
         'surname': business_info.get('surname'),
@@ -75,20 +79,18 @@ def process_contact(data, known_providers):
     return contact_data, None
 
 def import_campaign_contacts(file_path, campaign_name):
-    """Import and process contacts for a campaign with enhanced validation"""
+    """Import and process contacts for a campaign"""
     db = connect_to_db()
     contacts = db.contacts
     campaigns = db.campaigns
     
-    # Calculate the date 14 days ago
-    fourteen_days_ago = datetime.now(UTC) - timedelta(days=14)
-    
     stats = {
         'total_processed': 0,
         'new_to_master': 0,
-        'excluded_recent': 0,
-        'excluded_provider_domain': 0,
-        'excluded_invalid_email': 0,
+        'existing_in_master': 0,
+        'excluded_campaign_duplicate': 0,
+        'excluded_business_domain': 0,
+        'excluded_invalid': 0,
         'campaign_recipients': 0
     }
     
@@ -102,6 +104,13 @@ def import_campaign_contacts(file_path, campaign_name):
         logging.error(f"Campaign '{campaign_name}' already exists")
         return None
     
+    # Get existing business domains (excluding provider domains)
+    existing_business_domains = set(
+        domain for domain in contacts.distinct('domain')
+        if domain not in known_providers
+    )
+    
+    campaign_emails = set()  # Track emails in this campaign
     campaign_recipients = []
     
     try:
@@ -118,69 +127,50 @@ def import_campaign_contacts(file_path, campaign_name):
             stats['total_processed'] += 1
             
             try:
-                contact_data, error = process_contact(record, known_providers)
+                contact_data, error = process_contact(
+                    record,
+                    known_providers,
+                    existing_business_domains,
+                    campaign_emails
+                )
                 
                 if error:
-                    logging.warning(f"Skipping record: {error}")
-                    stats['excluded_invalid_email'] += 1
+                    if "already exists in this campaign" in error:
+                        logging.info(f"Skipping campaign duplicate: {record.get('business_info', {}).get('email')}")
+                        stats['excluded_campaign_duplicate'] += 1
+                    elif "Business domain" in error:
+                        logging.info(f"Skipping duplicate business domain: {error}")
+                        stats['excluded_business_domain'] += 1
+                    else:
+                        logging.warning(f"Skipping record: {error}")
+                        stats['excluded_invalid'] += 1
                     continue
                 
-                # Skip provider domain emails
-                if contact_data['is_provider_domain']:
-                    logging.warning(f"Skipping provider domain email: {contact_data['email']}")
-                    stats['excluded_provider_domain'] += 1
-                    continue
-                
-                # Check existing domain
-                domain = contact_data['domain']
-                existing_domain = db.existing_customers.find_one({'domain': domain})
-                
-                # Check if contact exists and when they were last emailed
+                # Check if contact exists in master list
                 existing_contact = contacts.find_one({'email': contact_data['email']})
                 
                 if existing_contact:
-                    last_email_date = existing_contact.get('last_email_sent')
-                    
-                    # Check if contact was emailed in last 14 days
-                    if last_email_date:
-                        # Ensure last_email_date is UTC aware if it isn't already
-                        if last_email_date.tzinfo is None:
-                            last_email_date = last_email_date.replace(tzinfo=UTC)
-                        if last_email_date > fourteen_days_ago:
-                            logging.info(f"Contact {contact_data['email']} emailed too recently")
-                            stats['excluded_recent'] += 1
-                            continue
+                    stats['existing_in_master'] += 1
+                    logging.info(f"Contact exists in master list: {contact_data['email']}")
                 else:
                     # Add new contact to master list
-                    contacts.update_one(
-                        {'email': contact_data['email']},
-                        {'$set': contact_data},
-                        upsert=True
-                    )
-                    
-                    # Add to existing_customers if not already there
-                    if not existing_domain:
-                        db.existing_customers.update_one(
-                            {'domain': domain},
-                            {
-                                '$set': {
-                                    'email': contact_data['email'],
-                                    'domain': domain,
-                                    'added_date': datetime.now(UTC),
-                                    'source_id': str(record.get('id', ''))
-                                }
-                            },
-                            upsert=True
-                        )
+                    contacts.insert_one(contact_data)
                     stats['new_to_master'] += 1
+                    logging.info(f"Added new contact to master list: {contact_data['email']}")
+                    
+                    # Add domain to tracking set if it's a business domain
+                    if contact_data['domain'] not in known_providers:
+                        existing_business_domains.add(contact_data['domain'])
                 
                 # Add to campaign recipients
                 campaign_recipients.append(contact_data['email'])
+                campaign_emails.add(contact_data['email'])
                 stats['campaign_recipients'] += 1
                 logging.info(f"Added to campaign: {contact_data['email']}")
                 
             except Exception as e:
                 logging.error(f"Error processing record: {e}")
+                stats['excluded_invalid'] += 1
                 
         # Create campaign record if we have recipients
         if campaign_recipients:
@@ -235,9 +225,10 @@ def main():
         logging.info("\nCampaign import completed:")
         logging.info(f"Total contacts processed: {stats['total_processed']}")
         logging.info(f"New contacts added to master list: {stats['new_to_master']}")
-        logging.info(f"Contacts excluded (emailed within 14 days): {stats['excluded_recent']}")
-        logging.info(f"Contacts excluded (provider domain): {stats['excluded_provider_domain']}")
-        logging.info(f"Contacts excluded (invalid email): {stats['excluded_invalid_email']}")
+        logging.info(f"Existing contacts in master list: {stats['existing_in_master']}")
+        logging.info(f"Excluded (campaign duplicate): {stats['excluded_campaign_duplicate']}")
+        logging.info(f"Excluded (business domain): {stats['excluded_business_domain']}")
+        logging.info(f"Excluded (invalid): {stats['excluded_invalid']}")
         logging.info(f"Final campaign recipients: {stats['campaign_recipients']}")
 
 if __name__ == "__main__":
