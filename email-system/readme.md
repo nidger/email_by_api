@@ -1,6 +1,6 @@
 # Email Campaign System
 
-A Python-based system for managing email campaigns with MongoDB and SendGrid, featuring contact management, campaign creation, and automated sending with frequency controls.
+A Python-based system for managing email campaigns with MongoDB and SendGrid, featuring contact management, campaign creation, automated sending with frequency controls, and intelligent email provider validation.
 
 ## Project Structure
 
@@ -9,12 +9,15 @@ email_by_api_v2/
 ├── .env (environment variables - not in Git)
 ├── .gitignore
 ├── email-system/ (Git-tracked code)
-│   ├── setup_database.py
-│   ├── import_contacts.py
-│   ├── import_campaign_contacts.py
-│   ├── send_campaign_emails.py
-│   └── update_dates.py
+│   ├── setup_database.py        # Database initialization
+│   ├── import_contacts.py       # Master contact list management
+│   ├── import_campaign_contacts.py  # Campaign-specific imports
+│   ├── send_campaign_emails.py  # Email sending logic
+│   ├── update_dates.py         # Testing utility
+│   └── email_providers.json    # Validated provider list
 └── email-system-data/ (local data only - not in Git)
+    ├── contacts.json          # Your contact data
+    └── campaign_contacts.json  # Campaign-specific contacts
 ```
 
 ## Requirements
@@ -38,24 +41,76 @@ git clone https://github.com/nidger/email_by_api.git
 - DEFAULT_FROM_EMAIL
 - PARTNER_WEBSITE_URL
 
-Note: The .env file is not tracked in Git for security.
+Note: The .env file and all data files are not tracked in Git for security.
 
-## System Components
+## Database Collections
 
-- `setup_database.py`: Initialize MongoDB collections and indexes
-- `import_contacts.py`: Add contacts to master list
-- `import_campaign_contacts.py`: Create campaigns from contact lists
-- `send_campaign_emails.py`: Send campaign emails
-- `update_dates.py`: Testing utility to modify last email dates
+### Core Collections
+- `contacts`: Master list of all contacts
+  - Unique email index
+  - Last email tracking
+  - Business information storage
+
+- `campaigns`: Campaign information
+  - Unique campaign name index
+  - Status tracking
+  - Recipient list management
+
+- `email_history`: Record of all sent emails
+  - Contact email tracking
+  - Campaign association
+  - Sending date indexing
+
+- `unsubscribes`: Unsubscribed contact tracking
+  - Unique email enforcement
+  - Timestamp tracking
+
+### New Features
+- `email_providers`: Known email provider domains
+  - Validates contact email domains
+  - Prevents common typos
+  - Helps identify business vs personal emails
+  - Automatic updates from JSON source
+
+- `existing_customers`: Customer tracking
+  - Domain-based duplicate detection
+  - Source tracking
+  - Added date monitoring
+
+## Contact Processing Rules
+
+### Validation Rules
+1. Email format validation
+2. Domain verification against email_providers list
+3. Business domain identification
+4. Duplicate detection at both email and domain levels
+
+### Sending Rules
+1. 14-day minimum between emails to same contact
+2. Automatic duplicate handling across campaigns
+3. Domain-based frequency controls
+4. Complete contact history tracking
+
+### Data Management
+1. Automatic domain extraction and validation
+2. Business information preservation
+3. Source tracking for all contacts
+4. Activity status monitoring
 
 ## Usage Instructions
 
 ### 1. Database Setup
 
-Run once to initialize the database structure:
+Initialize the database structure and email providers:
 ```bash
 python3 setup_database.py
 ```
+
+This will:
+- Create all required collections
+- Set up indexes
+- Import validated email providers
+- Establish validation rules
 
 ### 2. Contact Management
 
@@ -80,10 +135,6 @@ Options:
 ```bash
 python3 send_campaign_emails.py --campaign "Campaign Name"
 ```
-This will:
-- Send emails to all eligible recipients
-- Update contact email dates
-- Show sending statistics
 
 ### 4. Testing Tools
 
@@ -91,37 +142,10 @@ Update email dates for testing frequency rules:
 ```bash
 python3 update_dates.py --days 15
 ```
-Options:
-- `--days`: Number of days to set last email date (defaults to 15)
 
-## Workflow Example
+## Data Format Requirements
 
-```bash
-# First time setup
-python3 setup_database.py
-
-# Import new contacts
-python3 import_contacts.py --file new_contacts.json
-
-# Create campaign
-python3 import_campaign_contacts.py --campaign "January Newsletter"
-
-# Send emails
-python3 send_campaign_emails.py --campaign "January Newsletter"
-
-# For testing - update dates to send again
-python3 update_dates.py --days 15
-```
-
-## Important Notes
-
-### Contact Rules
-- 14-day minimum between emails to the same contact
-- Automatic duplicate handling
-- Complete contact history stored
-
-### File Format
-Contacts JSON must follow this structure:
+### Contact JSON Structure
 ```json
 {
   "store_name": "Example Store",
@@ -129,40 +153,60 @@ Contacts JSON must follow this structure:
     "business name": "Business Name",
     "first name": "First",
     "surname": "Last",
-    "email": "email@example.com"
-  }
+    "email": "email@example.com",
+    "address": "Full Address",
+    "phone number": "Contact Number",
+    "vat number": "VAT Number"
+  },
+  "url": "Store URL",
+  "scraped_at": "ISO DateTime"
 }
 ```
 
-### Database Collections
-- contacts: Master list of all contacts
-- campaigns: Campaign information
-- email_history: Record of all sent emails
-- unsubscribes: Tracking unsubscribed contacts
-
-## Troubleshooting
-
-If you encounter timezone warnings when running campaigns, ensure all scripts are using UTC-aware datetime objects.
-
-For testing purposes, use `update_dates.py` to reset email dates rather than manually modifying the database.
+### Email Providers JSON
+```json
+{
+  "email_providers": [
+    "provider1.com",
+    "provider2.com"
+  ]
+}
+```
 
 ## Error Handling
 
-The system includes:
-- Duplicate email prevention
-- Missing data handling
-- SendGrid error tracking
+The system includes comprehensive error handling for:
+- Email validation failures
+- Domain verification issues
+- Duplicate detection
+- SendGrid API errors
 - Campaign status monitoring
+- Data format validation
 
-## Development
+## Development Guidelines
 
-This project uses Git for version control. All sensitive data (including the .env file and email-system-data directory) is excluded from Git tracking.
+### Version Control
+- All code changes should be made in the `email-system/` directory
+- Never commit data files or .env
+- Update email_providers.json when new providers are validated
 
-To make changes:
-1. Edit files in the email-system/ directory
-2. Stage changes: `git add .`
-3. Commit changes: `git commit -m "Your message"`
-4. Push to GitHub: `git push`
+### Testing
+- Use update_dates.py for frequency rule testing
+- Validate new email providers before adding
+- Test campaign imports with sample data
+- Verify duplicate detection logic
+
+## Security Considerations
+
+1. Data Protection
+   - All contact data stays local
+   - No sensitive data in Git
+   - Secure credential management
+
+2. Email Security
+   - Domain validation
+   - Frequency controls
+   - Unsubscribe tracking
 
 ## Author
 
