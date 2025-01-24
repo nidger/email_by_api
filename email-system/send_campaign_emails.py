@@ -1,5 +1,5 @@
 from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail, MailSettings, SubscriptionTracking, TrackingSettings, ClickTracking, OpenTracking
+from sendgrid.helpers.mail import Mail
 from pymongo import MongoClient
 from datetime import datetime, UTC, timedelta
 import os
@@ -110,22 +110,13 @@ def send_campaign_emails(campaign_name):
     # Update campaign status to 'sending'
     update_campaign_status(db, campaign_name, 'sending')
     
-    # Set up tracking settings
-    tracking_settings = TrackingSettings()
-    tracking_settings.click_tracking = ClickTracking(enable=True)
-    tracking_settings.open_tracking = OpenTracking(enable=True)
-    
-    # Set up subscription tracking
-    subscription_tracking = SubscriptionTracking()
-    subscription_tracking.enable = True
-    tracking_settings.subscription_tracking = subscription_tracking
-    
-    # Email content
+    # HTML content (NO MANUAL UNSUBSCRIBE LINKS)
     html_content = '''
     <p>This is a test email to verify our SendGrid integration is working correctly.</p>
     <p>Check out our partner website: <a href="{partner_url}">{partner_url}</a></p>
     '''.format(partner_url=os.getenv('PARTNER_WEBSITE_URL'))
-    
+
+    # Plain text content (NO MANUAL UNSUBSCRIBE LINKS)
     plain_text_content = '''
     This is a test email to verify our SendGrid integration is working correctly.
     Check out our partner website: {partner_url}
@@ -138,7 +129,6 @@ def send_campaign_emails(campaign_name):
         'failed': 0,
         'skipped_invalid_email': 0,
         'skipped_frequency': 0,
-        'skipped_unsubscribed': 0,
         'skipped_existing_customer': 0
     }
     
@@ -161,13 +151,6 @@ def send_campaign_emails(campaign_name):
             record_email_history(db, email, campaign_name, 'skipped', 'Existing customer')
             continue
 
-        # Check if contact is unsubscribed
-        if db.unsubscribes.find_one({'email': email}):
-            logging.info(f"Skipping unsubscribed contact: {email}")
-            stats['skipped_unsubscribed'] += 1
-            record_email_history(db, email, campaign_name, 'skipped', 'Unsubscribed')
-            continue
-
         # Check if this specific email has been sent within frequency period
         contact = db.contacts.find_one({'email': email})
         if contact and contact.get('last_email_sent'):
@@ -187,9 +170,7 @@ def send_campaign_emails(campaign_name):
                 plain_text_content=plain_text_content
             )
             
-            message.tracking_settings = tracking_settings
-            
-            # Send the email
+            # Send the email (NO TRACKING SETTINGS CONFIGURATION)
             response = sg.send(message)
             
             if response.status_code == 202:
@@ -221,7 +202,6 @@ def send_campaign_emails(campaign_name):
     logging.info(f"Failed: {stats['failed']}")
     logging.info(f"Skipped (invalid email): {stats['skipped_invalid_email']}")
     logging.info(f"Skipped (frequency): {stats['skipped_frequency']}")
-    logging.info(f"Skipped (unsubscribed): {stats['skipped_unsubscribed']}")
     logging.info(f"Skipped (existing customer): {stats['skipped_existing_customer']}")
 
 def main():
