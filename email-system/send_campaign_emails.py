@@ -110,13 +110,13 @@ def send_campaign_emails(campaign_name):
     # Update campaign status to 'sending'
     update_campaign_status(db, campaign_name, 'sending')
     
-    # HTML content (NO MANUAL UNSUBSCRIBE LINKS)
+    # HTML content
     html_content = '''
     <p>This is a test email to verify our SendGrid integration is working correctly.</p>
     <p>Check out our partner website: <a href="{partner_url}">{partner_url}</a></p>
     '''.format(partner_url=os.getenv('PARTNER_WEBSITE_URL'))
 
-    # Plain text content (NO MANUAL UNSUBSCRIBE LINKS)
+    # Plain text content 
     plain_text_content = '''
     This is a test email to verify our SendGrid integration is working correctly.
     Check out our partner website: {partner_url}
